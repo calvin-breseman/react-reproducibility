@@ -1,0 +1,189 @@
+diff --git a/trajectron/environment/data_structures.py b/trajectron/environment/data_structures.py
+index 5ffdc6f..d16a9ea 100644
+--- a/trajectron/environment/data_structures.py
++++ b/trajectron/environment/data_structures.py
+@@ -1,6 +1,7 @@
+ import numpy as np
+ import pandas as pd
+-from collections import Sequence, OrderedDict
++from collections.abc import Sequence
++from collections import OrderedDict
+ 
+ 
+ class RingBuffer(Sequence):
+diff --git a/trajectron/environment/environment.py b/trajectron/environment/environment.py
+index 22ddd14..a2b8bf3 100644
+--- a/trajectron/environment/environment.py
++++ b/trajectron/environment/environment.py
+@@ -1,4 +1,4 @@
+-import orjson
++import json as orjson  # patched: orjson not installed; only used for a memo key
+ import numpy as np
+ from itertools import product
+ from .node_type import NodeTypeEnum
+@@ -21,7 +21,7 @@ class Environment(object):
+         return list(product(self.NodeType, repeat=2))
+ 
+     def get_standardize_params(self, state, node_type):
+-        memo_key = (orjson.dumps(state), node_type)
++        memo_key = (orjson.dumps(state, sort_keys=False), node_type)
+         if memo_key in self.standardize_param_memo:
+             return self.standardize_param_memo[memo_key]
+ 
+diff --git a/trajectron/environment/node.py b/trajectron/environment/node.py
+index 2db820e..09d91a8 100644
+--- a/trajectron/environment/node.py
++++ b/trajectron/environment/node.py
+@@ -2,7 +2,19 @@ import random
+ import numpy as np
+ import pandas as pd
+ from environment import DoubleHeaderNumpyArray
+-from ncls import NCLS
++try:
++    from ncls import NCLS
++except ImportError:  # patched: ncls is only used by MultiNode (robot nodes), not pedestrians
++    class NCLS(object):
++        """Minimal numpy stand-in for ncls.NCLS (interval overlap query)."""
++        def __init__(self, starts, ends, ids):
++            self.starts, self.ends, self.ids = starts, ends, ids
++
++        def find_overlap(self, start, end):
++            # ncls intervals are half-open [start, end)
++            for s, e, i in zip(self.starts, self.ends, self.ids):
++                if s < end and start < e:
++                    yield (s, e, i)
+ 
+ 
+ class Node(object):
+diff --git a/trajectron/environment/scene_graph.py b/trajectron/environment/scene_graph.py
+index 1113bd4..4d969e9 100644
+--- a/trajectron/environment/scene_graph.py
++++ b/trajectron/environment/scene_graph.py
+@@ -135,10 +135,10 @@ class TemporalSceneGraph(object):
+         position_cube = np.full((total_timesteps, N, 2), np.nan)
+ 
+         adj_cube = np.zeros((total_timesteps, N, N), dtype=np.int8)
+-        dist_cube = np.zeros((total_timesteps, N, N), dtype=np.float)
++        dist_cube = np.zeros((total_timesteps, N, N), dtype=float)
+ 
+         node_type_mat = np.zeros((N, N), dtype=np.int8)
+-        node_attention_mat = np.zeros((N, N), dtype=np.float)
++        node_attention_mat = np.zeros((N, N), dtype=float)
+ 
+         for node_idx, node in enumerate(nodes):
+             if online:
+diff --git a/trajectron/model/dataset/preprocessing.py b/trajectron/model/dataset/preprocessing.py
+index 844d306..dbbc3cb 100644
+--- a/trajectron/model/dataset/preprocessing.py
++++ b/trajectron/model/dataset/preprocessing.py
+@@ -2,7 +2,7 @@ import torch
+ import numpy as np
+ import collections.abc
+ from torch.utils.data._utils.collate import default_collate
+-import dill
++import pickle as dill  # patched: dill not installed; plain pickle suffices for tensors/np arrays
+ container_abcs = collections.abc
+ 
+ 
+diff --git a/trajectron/model/mgcvae.py b/trajectron/model/mgcvae.py
+index 8760d6d..8c456a5 100644
+--- a/trajectron/model/mgcvae.py
++++ b/trajectron/model/mgcvae.py
+@@ -777,7 +777,7 @@ class MultimodalGenerativeCVAE(object):
+         return log_pis, mus, log_sigmas, corrs
+ 
+     def p_y_xz(self, mode, x, x_nr_t, y_r, n_s_t0, z_stacked, prediction_horizon,
+-               num_samples, num_components=1, gmm_mode=False):
++               num_samples, num_components=1, gmm_mode=False, dist_only=False):
+         r"""
+         .. math:: p_\psi(\mathbf{y}_i \mid \mathbf{x}_i, z)
+ 
+@@ -875,6 +875,8 @@ class MultimodalGenerativeCVAE(object):
+         else:
+             y_dist = a_dist
+ 
++        if mode == ModeKeys.PREDICT and dist_only:  # patched: skip (slow) sampling / grid-search mode
++            return y_dist, None
+         if mode == ModeKeys.PREDICT:
+             if gmm_mode:
+                 a_sample = a_dist.mode()
+@@ -1141,3 +1143,35 @@ class MultimodalGenerativeCVAE(object):
+                                             gmm_mode)
+ 
+         return our_sampled_future
++
++    def predict_dist(self,
++                     inputs,
++                     inputs_st,
++                     first_history_indices,
++                     prediction_horizon,
++                     gmm_mode=True):
++        """
++        Patched addition (single-agent use: no neighbours / robot / map).
++        Returns the full predictive mixture over position without sampling: a GMM2D whose components are the
++        K = N*K latent modes z (weights p(z|x) = exp(log_pis), constant over the horizon), each a Gaussian per
++        step. gmm_mode=True feeds the decoder its own mean action (deterministic), False feeds sampled actions.
++
++        :return: GMM2D with log_pis [1, B, ph, K], mus [1, B, ph, K, 2]
++        """
++        mode = ModeKeys.PREDICT
++        x, x_nr_t, _, y_r, _, n_s_t0 = self.obtain_encoded_tensors(mode=mode,
++                                                                   inputs=inputs,
++                                                                   inputs_st=inputs_st,
++                                                                   labels=None,
++                                                                   labels_st=None,
++                                                                   first_history_indices=first_history_indices,
++                                                                   neighbors=None,
++                                                                   neighbors_edge_value=None,
++                                                                   robot=None,
++                                                                   map=None)
++        self.latent.p_dist = self.p_z_x(mode, x)
++        z, num_samples, num_components = self.latent.sample_p(1, mode, most_likely_z=False,
++                                                              full_dist=True, all_z_sep=False)
++        y_dist, _ = self.p_y_xz(mode, x, x_nr_t, y_r, n_s_t0, z, prediction_horizon,
++                                num_samples, num_components, gmm_mode, dist_only=True)
++        return y_dist
+diff --git a/trajectron/model/model_registrar.py b/trajectron/model/model_registrar.py
+index 111a8ab..c888b6b 100644
+--- a/trajectron/model/model_registrar.py
++++ b/trajectron/model/model_registrar.py
+@@ -65,7 +65,7 @@ class ModelRegistrar(nn.Module):
+ 
+         print('')
+         print('Loading from ' + save_path)
+-        self.model_dict = torch.load(save_path, map_location=self.device)
++        self.model_dict = torch.load(save_path, map_location=self.device, weights_only=False)  # patched for torch>=2.6 (trusted repo checkpoint)
+         print('Loaded!')
+         print('')
+ 
+diff --git a/trajectron/visualization/visualization.py b/trajectron/visualization/visualization.py
+index 08e1fef..04c68b3 100644
+--- a/trajectron/visualization/visualization.py
++++ b/trajectron/visualization/visualization.py
+@@ -4,7 +4,10 @@ import matplotlib.pyplot as plt
+ import matplotlib.patches as patches
+ import matplotlib.patheffects as pe
+ import numpy as np
+-import seaborn as sns
++try:
++    import seaborn as sns
++except ImportError:  # patched: seaborn is only used for plotting
++    sns = None
+ 
+ 
+ def plot_trajectories(ax,
+diff --git a/trajectron/visualization/visualization_utils.py b/trajectron/visualization/visualization_utils.py
+index 8ad700e..6ffb2b0 100644
+--- a/trajectron/visualization/visualization_utils.py
++++ b/trajectron/visualization/visualization_utils.py
+@@ -1,6 +1,9 @@
+ import numpy as np
+ import pandas as pd
+-import seaborn as sns
++try:
++    import seaborn as sns
++except ImportError:  # patched: seaborn is only used for plotting
++    sns = None
+ 
+ 
+ def plot_boxplots(ax, perf_dict_for_pd, x_label, y_label):

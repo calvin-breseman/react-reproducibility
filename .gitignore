@@ -1,0 +1,5 @@
+data/eindhoven_20000tracks.csv
+outputs/
+third_party/Trajectron-plus-plus/
+__pycache__/
+.DS_Store

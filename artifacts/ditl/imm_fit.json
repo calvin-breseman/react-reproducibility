@@ -1,0 +1,63 @@
+{
+ "measurement_noise": 0.001003159313043581,
+ "sigma_a_cv": 0.2567260087473175,
+ "sigma_a_ct": 0.8793792152146362,
+ "sigma_a_stop": 0.24988690124685697,
+ "stop_velocity_decay": 0.24991269030799063,
+ "p_stay": 0.9490847512982385,
+ "turn_rate": 0.400151365497281,
+ "measurement_noise_stop": 0.0010000013522768443,
+ "p_stay_stop": 0.9400226648424705,
+ "nll_per_frame": -7.801026461872347,
+ "n_frames": 123663,
+ "n_tracks": 569,
+ "converged": false,
+ "n_evals": 901,
+ "at_bound": [
+  "measurement_noise",
+  "sigma_a_stop",
+  "stop_velocity_decay",
+  "turn_rate",
+  "measurement_noise_stop",
+  "p_stay_stop"
+ ],
+ "bounds": {
+  "measurement_noise": [
+   0.001,
+   0.038
+  ],
+  "sigma_a_cv": [
+   0.2,
+   0.6
+  ],
+  "sigma_a_ct": [
+   0.5,
+   0.9
+  ],
+  "sigma_a_stop": [
+   0.0,
+   0.25
+  ],
+  "stop_velocity_decay": [
+   0.05,
+   0.25
+  ],
+  "p_stay": [
+   0.94,
+   0.9999
+  ],
+  "turn_rate": [
+   0.4,
+   0.8
+  ],
+  "measurement_noise_stop": [
+   0.001,
+   0.038
+  ],
+  "p_stay_stop": [
+   0.94,
+   0.9999
+  ]
+ },
+ "fit_wall_s": 1106.8424270153046
+}
